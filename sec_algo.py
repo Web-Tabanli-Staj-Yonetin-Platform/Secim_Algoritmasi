@@ -1,9 +1,9 @@
-import pymongo
+from pymongo import MongoClient
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-client = pymongo.MongoClient("mongodb+srv://omerfaruk:12345@stajyonetim.0lqminl.mongodb.net/")
+client = MongoClient("mongodb+srv://omerfaruk:12345@stajyonetim.0lqminl.mongodb.net/")
 db = client["test"]
 intern_collection = db["interns"]
 ilan_collection = db["adverts"]
@@ -45,6 +45,7 @@ language_levels = {
     "C2": "İleri Seviye"
 }
 
+
 # Match score hesaplama fonksiyonu
 def calculate_match_score(intern_interest, ilan_scope, intern_department, ilan_departments, intern_avg_grade,
                           ilan_wanted, intern_skills, intern_teamwork, intern_communication, intern_analytical,
@@ -73,6 +74,7 @@ def calculate_match_score(intern_interest, ilan_scope, intern_department, ilan_d
 
     # Skills eşleştirme kontrolü
     skill_match_score = 0
+    total_wanted_skills = 0
     for skill in intern_skills:
         if '(' in skill and ')' in skill:
             skill_name, skill_level = skill.rsplit('(', 1)
@@ -80,6 +82,12 @@ def calculate_match_score(intern_interest, ilan_scope, intern_department, ilan_d
             skill_level = skill_level.strip(') ')
             if skill_name in ilan_wanted:
                 skill_match_score += skill_levels.get(skill_level, 0)
+                total_wanted_skills += 1
+
+    if total_wanted_skills > 0:
+        total_skill_match_score = skill_match_score / total_wanted_skills
+    else:
+        total_skill_match_score = skill_match_score
 
     # Takım Çalışması eşleştirme kontrolü
     teamwork_match_score = teamwork_levels.get(intern_teamwork, 0)
@@ -115,13 +123,15 @@ def calculate_match_score(intern_interest, ilan_scope, intern_department, ilan_d
                           field_match * 2
                           + department_match
                           + grade_match
-                          + skill_match_score
+                          + total_skill_match_score
                           + teamwork_match_score
                           + communication_match_score
                           + analytical_match_score
                           + language_match_score
-                  ) / 9
-    return total_score
+                  ) / 8
+    r_total_score = round(total_score, 2)
+    return r_total_score
+
 
 # Her bir intern için ilan verilerini eşleştir ve MongoDB'ye kaydet
 for intern in intern_collection.find():
@@ -151,5 +161,15 @@ for intern in intern_collection.find():
         "intern_id": intern["_id"],
         "matches": top_matches[:3]  # İlk 3 eşleşmeyi al
     }
-    matched_content_collection.insert_one(matched_content)
+
+    # Mevcut kayıt olup olmadığını kontrol et ve güncelle veya ekle
+    existing_record = matched_content_collection.find_one({"intern_id": intern["_id"]})
+    if existing_record:
+        matched_content_collection.update_one(
+            {"intern_id": intern["_id"]},
+            {"$set": matched_content}
+        )
+    else:
+        matched_content_collection.insert_one(matched_content)
+
     print("Matched content saved for intern:", intern["_id"])
